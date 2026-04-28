@@ -11,3 +11,7 @@ public class MyService {
 }
 ```
 
+Yahan:
+* MyService ek Spring Bean hai
+* Kyunki humne @Component use kiya
+
