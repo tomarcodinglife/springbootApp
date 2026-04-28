@@ -1,3 +1,130 @@
+# Strategy Design Pattern
+Strategy Design Pattern ek behavioral design pattern hai jo allow karta hai ki tum algorithm ko runtime par change kar sako.
+Simple words: Same kaam, multiple tareeke → aur tum choose kar sakte ho kaunsa use karna hai
+
+##Real Life Example
+###Payment system 💳
+* Credit Card
+* UPI
+* PayPal
+Payment same hai, but method different
+
+## Without Strategy Pattern (Bad Code ❌)
+```java
+class PaymentService {
+    public void pay(String type) {
+        if(type.equals("credit")) {
+            System.out.println("Paid using Credit Card");
+        } else if(type.equals("upi")) {
+            System.out.println("Paid using UPI");
+        }
+    }
+}
+
+```
+Problem:
+Har naya method → code change karna padega
+Tight coupling
+
+## With Strategy Pattern (Good Code ✅)
+### Step 1: Interface
+
+```java
+interface PaymentStrategy {
+    void pay();
+}
+```
+
+### Step 2: Different Strategies
+
+```java
+class CreditCardPayment implements PaymentStrategy {
+    public void pay() {
+        System.out.println("Paid using Credit Card");
+    }
+}
+
+class UPIPayment implements PaymentStrategy {
+    public void pay() {
+        System.out.println("Paid using UPI");
+    }
+}
+
+```
+### Step 3: Context Class
+
+```java
+class PaymentService {
+    private PaymentStrategy strategy;
+
+    public PaymentService(PaymentStrategy strategy) {
+        this.strategy = strategy;
+    }
+
+    public void processPayment() {
+        strategy.pay();
+    }
+}
+```
+
+### Use
+
+```java
+public class Main {
+    public static void main(String[] args) {
+        PaymentStrategy strategy = new UPIPayment();
+        PaymentService service = new PaymentService(strategy);
+        service.processPayment();
+    }
+}
+```
+
+Benefits
+Easy to extend (new strategy add karo)
+Code clean & maintainable
+Open/Closed Principle follow karta hai
+
+
+# Tight Coupling vs Loose Coupling
+
+## Tight Coupling (Bad ❌)
+👉 Jab ek class dusri class par strongly dependent hoti hai
+```java
+class Engine {}
+
+class Car {
+    Engine engine = new Engine(); // direct dependency
+}
+```
+Problem:
+* Change karna mushkil
+* Testing hard
+* Reusability low
+
+## Loose Coupling (Good ✅)
+👉 Jab dependency indirect / flexible hoti hai (interface use karke)
+
+```java
+interface Engine {}
+
+class PetrolEngine implements Engine {}
+class DieselEngine implements Engine {}
+
+class Car {
+    Engine engine;
+
+    Car(Engine engine) {
+        this.engine = engine;
+    }
+}
+```
+
+Ab easily change kar sakte h
+```java
+Car car = new Car(new PetrolEngine());
+```
+
+
 # Spring Bean kya hota hai?
 Spring Boot me Bean ek object hota hai jise Spring Framework khud create, manage aur control karta hai.
 Jo object Spring container banata aur handle karta hai = Bean
