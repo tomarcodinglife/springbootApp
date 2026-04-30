@@ -14,8 +14,11 @@
 6. [AOP](#6-aop)
 7. [ApplicationContext & BeanFactory](#7-applicationcontext--beanfactory)
 8. [Spring Data JPA](#8-spring-data-jpa)
-9. [Spring MVC](#9-spring-mvc) *(Coming Soon)*
-10. [Spring Security](#10-spring-security) *(Coming Soon)*
+9. [Spring MVC](#9-spring-mvc)
+10. [Spring Security](#10-spring-security)
+11. [Spring Boot Auto-Configuration](#11-spring-boot-auto-configuration)
+12. [Profiles](#12-profiles)
+13. [Testing](#13-testing)
 
 ---
 
@@ -1212,7 +1215,671 @@ public User createUser(@Valid @RequestBody User user) {
 
 ## 10. Spring Security
 
-> 🚧 *Coming Soon — Next Topic*
+### Authentication vs Authorization
+```
+Authentication  → "Kaun ho tum?" (Login — username/password verify)
+Authorization   → "Tumhe permission hai?" (Role check — ADMIN/USER)
+```
+
+---
+
+### SecurityFilterChain — Modern way (Spring Boot 3+)
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())  // REST API ke liye CSRF disable
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/public/**").permitAll()    // Sab access kar sakte
+                .requestMatchers("/api/admin/**").hasRole("ADMIN") // Sirf ADMIN
+                .requestMatchers("/api/users/**").hasRole("USER")  // Sirf USER
+                .anyRequest().authenticated()  // Baaki sab login chahiye
+            )
+            .httpBasic(Customizer.withDefaults());
+
+        return http.build();
+    }
+}
+```
+
+---
+
+### JWT Flow
+
+```
+User login karta hai
+        ↓
+Server token generate karta hai (JWT)
+        ↓
+User har request mein ye token bhejta hai (Header mein)
+        ↓
+Server token verify karta hai
+        ↓
+Access milta hai ✅
+```
+
+```
+JWT Token structure:
+eyJhbGciOiJIUzI1NiJ9    ← Header (algorithm)
+.eyJ1c2VyIjoiUmFodWwifQ ← Payload (user data)
+.SflKxwRJSMeKKF2QT4fw   ← Signature (verify ke liye)
+```
+
+---
+
+### UserDetailsService — DB se users load karo
+
+```java
+@Service
+public class CustomUserDetailsService implements UserDetailsService {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String username)
+            throws UsernameNotFoundException {
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found!"));
+
+        return org.springframework.security.core.userdetails.User
+                .withUsername(user.getUsername())
+                .password(user.getPassword())  // Encrypted password
+                .roles(user.getRole())
+                .build();
+    }
+}
+```
+
+---
+
+### Password Encoding — Plain text kabhi nahi!
+
+```java
+@Bean
+public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+}
+
+@PostMapping("/register")
+public User register(@RequestBody User user) {
+    // "mypassword123" → "$2a$10$xyz..." (encrypted)
+    user.setPassword(passwordEncoder.encode(user.getPassword()));
+    return userRepository.save(user);
+}
+```
+
+---
+
+### Method Level Security
+
+```java
+@Configuration
+@EnableMethodSecurity
+public class SecurityConfig { }
+
+@Service
+public class AdminService {
+
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<User> getAllUsers() {
+        return userRepository.findAll();
+    }
+
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    public User getOwnProfile(Long id) {
+        return userRepository.findById(id).orElseThrow();
+    }
+}
+```
+
+---
+
+### Interview Questions
+
+**Q1. Authentication vs Authorization kya hai?**
+> Authentication — "Kaun ho tum?" (login verify). Authorization — "Tumhe permission hai?" (role check). Pehle authentication, phir authorization
+
+**Q2. JWT kya hota hai aur kaise kaam karta hai?**
+> JSON Web Token — stateless authentication. Login pe token milta hai, har request mein header mein bhejte hain, server verify karta hai. Session DB mein save nahi hota
+
+**Q3. BCrypt kyun use karte hain?**
+> One-way hash — original password recover nahi ho sakta. Slow by design — brute force mushkil. Salt automatically add hota hai
+
+**Q4. CSRF kya hai aur REST APIs mein disable kyun karte hain?**
+> Cross-Site Request Forgery attack. REST APIs JWT use karte hain jo cookies mein nahi hota, isliye CSRF attack possible nahi — safely disable kar sakte hain
+
+**Q5. @PreAuthorize vs URL-based security?**
+> URL-based — `SecurityFilterChain` mein (coarse-grained). `@PreAuthorize` — method level pe (fine-grained). Dono saath use kar sakte hain
+
+---
+
+### Summary Table
+
+| Concept | Matlab |
+|---|---|
+| Authentication | Login verify — kaun ho tum |
+| Authorization | Permission check — kya kar sakte ho |
+| JWT | Stateless token-based auth |
+| BCrypt | Password hashing — one way |
+| `SecurityFilterChain` | Security rules configure karo |
+| `UserDetailsService` | DB se users load karo |
+| `@PreAuthorize` | Method level security |
+| `permitAll()` | Sab access kar sakte |
+| `hasRole()` | Specific role chahiye |
+
+---
+
+## 11. Spring Boot Auto-Configuration
+
+### Auto-Configuration kya hai?
+> Spring Boot dependencies dekh ke **khud decide karta hai** ki kya configure karna hai — aapko kuch nahi karna!
+
+```
+Pehle (Spring Core):
+- DataSource manually configure karo
+- TransactionManager manually configure karo
+- EntityManagerFactory manually configure karo
+- Sab XML/Java config mein likhna padta tha 😫
+
+Spring Boot ke saath:
+- spring-boot-starter-data-jpa add karo
+- application.properties mein DB URL do
+- Ho gaya! ✅ Sab auto-configure ho jaata hai
+```
+
+---
+
+### Kaise kaam karta hai?
+
+```java
+@SpringBootApplication
+public class MyApp {
+    public static void main(String[] args) {
+        SpringApplication.run(MyApp.class, args);
+    }
+}
+```
+
+`@SpringBootApplication` = teen annotations ek saath:
+```java
+@SpringBootConfiguration   // Configuration class hai
+@EnableAutoConfiguration   // Auto-config enable karo ← YE MAGIC KARTA HAI
+@ComponentScan             // Beans scan karo
+```
+
+---
+
+### Auto-Configuration andar kaise hoti hai?
+
+```
+1. Spring Boot classpath scan karta hai
+        ↓
+2. spring.factories / AutoConfiguration.imports file padta hai
+        ↓
+3. Conditions check karta hai (@ConditionalOnClass, @ConditionalOnMissingBean)
+        ↓
+4. Agar condition match — auto-configure karo
+        ↓
+5. Agar aapne khud configure kiya — Spring Boot skip kar deta hai
+```
+
+---
+
+### @Conditional Annotations
+
+```java
+// Sirf tab configure karo jab ye class classpath mein ho
+@ConditionalOnClass(DataSource.class)
+
+// Sirf tab configure karo jab ye bean already na ho
+@ConditionalOnMissingBean(DataSource.class)
+
+// Sirf tab jab property set ho
+@ConditionalOnProperty(name = "feature.enabled", havingValue = "true")
+
+// Sirf tab jab web application ho
+@ConditionalOnWebApplication
+```
+
+**Example — DataSource auto-configuration:**
+```java
+@Configuration
+@ConditionalOnClass(DataSource.class)          // JPA dependency hai toh
+@ConditionalOnMissingBean(DataSource.class)    // Aapne khud nahi banaya toh
+public class DataSourceAutoConfiguration {
+
+    @Bean
+    public DataSource dataSource() {
+        // application.properties se config read karo
+        // DataSource automatically configure karo
+    }
+}
+```
+
+---
+
+### Auto-Configuration debug karo
+
+```properties
+# application.properties mein ye add karo
+debug=true
+```
+
+Console mein dikhaega:
+```
+============================
+CONDITIONS EVALUATION REPORT
+============================
+Positive matches (auto-configured):
+   DataSourceAutoConfiguration - @ConditionalOnClass matched ✅
+   
+Negative matches (skipped):
+   MongoAutoConfiguration - @ConditionalOnClass did not find MongoDB ❌
+```
+
+---
+
+### Auto-Configuration override karo
+
+```java
+// Aapka khud ka DataSource — Spring Boot ka skip ho jaayega
+@Bean
+public DataSource dataSource() {
+    HikariDataSource ds = new HikariDataSource();
+    ds.setJdbcUrl("jdbc:mysql://localhost:3306/mydb");
+    return ds;
+}
+```
+
+> **Convention over Configuration** — Spring Boot ka default use karo, zaroorat ho tab override karo
+
+---
+
+### Interview Questions
+
+**Q1. Spring Boot Auto-Configuration kaise kaam karta hai?**
+> `@EnableAutoConfiguration` classpath scan karta hai, `spring.factories` file se auto-config classes load karta hai, `@Conditional` annotations se decide karta hai kya configure karna hai
+
+**Q2. Auto-Configuration disable karna ho toh?**
+> `@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})`
+
+**Q3. @ConditionalOnMissingBean kya karta hai?**
+> Sirf tab bean banata hai jab us type ka bean already exist na kare — isliye aap override kar sakte ho
+
+**Q4. spring.factories file kya hoti hai?**
+> META-INF/spring.factories mein auto-configuration classes listed hoti hain — Spring Boot inhe automatically load karta hai
+
+---
+
+### Summary Table
+
+| Concept | Matlab |
+|---|---|
+| `@EnableAutoConfiguration` | Auto-config enable karo |
+| `@ConditionalOnClass` | Class hai toh configure karo |
+| `@ConditionalOnMissingBean` | Bean nahi hai toh configure karo |
+| `spring.factories` | Auto-config classes ki list |
+| Override | Khud @Bean banao — Boot ka skip |
+
+---
+
+## 12. Spring Profiles
+
+### Profiles kya hote hain?
+> Alag alag environments ke liye alag alag configuration — ek hi code, alag config!
+
+```
+Development  → Local DB, debug logs, fake email
+Testing      → In-memory DB (H2), mock services
+Production   → Real DB, minimal logs, real email
+```
+
+---
+
+### application.properties — Profile wise
+
+```
+src/main/resources/
+    application.properties          ← Common config (sab mein)
+    application-dev.properties      ← Dev config
+    application-test.properties     ← Test config
+    application-prod.properties     ← Production config
+```
+
+```properties
+# application-dev.properties
+spring.datasource.url=jdbc:mysql://localhost:3306/devdb
+spring.jpa.show-sql=true
+logging.level.root=DEBUG
+
+# application-prod.properties
+spring.datasource.url=jdbc:mysql://prod-server:3306/proddb
+spring.jpa.show-sql=false
+logging.level.root=ERROR
+```
+
+---
+
+### Profile activate kaise karo?
+
+```properties
+# application.properties mein
+spring.profiles.active=dev
+```
+
+```bash
+# Command line se
+java -jar myapp.jar --spring.profiles.active=prod
+
+# Environment variable se
+export SPRING_PROFILES_ACTIVE=prod
+```
+
+---
+
+### @Profile — Bean sirf specific profile mein
+
+```java
+// Sirf dev profile mein ye bean banega
+@Component
+@Profile("dev")
+public class MockEmailService implements EmailService {
+    public void sendEmail(String to, String body) {
+        System.out.println("FAKE EMAIL to: " + to); // Actually send nahi karta
+    }
+}
+
+// Sirf prod profile mein ye bean banega
+@Component
+@Profile("prod")
+public class RealEmailService implements EmailService {
+    public void sendEmail(String to, String body) {
+        // Actually email bhejta hai
+        smtpClient.send(to, body);
+    }
+}
+```
+
+> Spring automatically sahi bean inject karega profile ke hisaab se — code change nahi karna!
+
+---
+
+### Multiple Profiles
+
+```java
+@Component
+@Profile({"dev", "test"})  // Dev aur Test dono mein
+public class H2DataInitializer { }
+
+@Component
+@Profile("!prod")  // Production CHHOD KE sab mein
+public class DevToolsConfig { }
+```
+
+---
+
+### @ActiveProfiles — Testing mein
+
+```java
+@SpringBootTest
+@ActiveProfiles("test")  // Test profile use karo
+public class UserServiceTest {
+    // application-test.properties use hogi
+}
+```
+
+---
+
+### Interview Questions
+
+**Q1. Spring Profiles kab use karte hain?**
+> Jab alag environments (dev/test/prod) mein alag configuration chahiye — DB URL, logging level, external services
+
+**Q2. Profile kaise activate karte hain?**
+> `spring.profiles.active=prod` properties mein, ya command line `--spring.profiles.active=prod`, ya environment variable
+
+**Q3. @Profile("!prod") kya matlab?**
+> Production CHHOD KE baaki sab profiles mein ye bean banega
+
+**Q4. Default profile kya hota hai?**
+> Koi profile active na ho toh `default` profile use hoti hai — `application.properties` load hoti hai
+
+---
+
+### Summary Table
+
+| Concept | Matlab |
+|---|---|
+| Profile | Environment-specific config |
+| `application-dev.properties` | Dev profile ki config |
+| `spring.profiles.active` | Profile activate karo |
+| `@Profile("dev")` | Sirf dev mein ye bean bano |
+| `@Profile("!prod")` | Prod chhod ke sab mein |
+| `@ActiveProfiles` | Test mein profile set karo |
+
+---
+
+## 13. Spring Testing
+
+### Testing kyun zaroori hai?
+> Code likha — kaam karta hai guarantee nahi. Tests likho — har baar guarantee!
+
+```
+Unit Test      → Ek class/method test karo (fast, isolated)
+Integration Test → Multiple layers saath test karo (slow, realistic)
+```
+
+---
+
+### Dependencies
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-test</artifactId>
+    <scope>test</scope>
+    <!-- JUnit 5, Mockito, AssertJ sab include hain -->
+</dependency>
+```
+
+---
+
+### Unit Test — @ExtendWith(MockitoExtension.class)
+
+```java
+@ExtendWith(MockitoExtension.class)  // Spring context load nahi hota — fast!
+class UserServiceTest {
+
+    @Mock
+    private UserRepository userRepository;  // Fake repository
+
+    @InjectMocks
+    private UserService userService;  // Real service, fake dependencies ke saath
+
+    @Test
+    void getUserById_success() {
+        // GIVEN — setup karo
+        User mockUser = new User(1L, "Rahul", "rahul@gmail.com");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(mockUser));
+
+        // WHEN — method call karo
+        User result = userService.getUserById(1L);
+
+        // THEN — verify karo
+        assertThat(result.getName()).isEqualTo("Rahul");
+        verify(userRepository, times(1)).findById(1L);
+    }
+
+    @Test
+    void getUserById_notFound_throwsException() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(RuntimeException.class,
+            () -> userService.getUserById(99L));
+    }
+}
+```
+
+---
+
+### Integration Test — @SpringBootTest
+
+```java
+@SpringBootTest  // Poora Spring context load hota hai
+@AutoConfigureMockMvc  // MockMvc automatically configure hoti hai
+class UserControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;  // HTTP requests simulate karo
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Test
+    void getAllUsers_returnsOk() throws Exception {
+        mockMvc.perform(get("/api/users")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void createUser_returnsCreated() throws Exception {
+        String userJson = """
+            {"name": "Rahul", "email": "rahul@gmail.com"}
+            """;
+
+        mockMvc.perform(post("/api/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(userJson))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value("Rahul"));
+    }
+}
+```
+
+---
+
+### @MockBean — Spring Context mein mock inject karo
+
+```java
+@SpringBootTest
+@AutoConfigureMockMvc
+class UserControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean  // Spring context mein real bean ki jagah mock lagao
+    private UserService userService;
+
+    @Test
+    void getUser_returnsMockedUser() throws Exception {
+        User mockUser = new User(1L, "Rahul", "rahul@gmail.com");
+        when(userService.getUserById(1L)).thenReturn(mockUser);
+
+        mockMvc.perform(get("/api/users/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Rahul"));
+    }
+}
+```
+
+---
+
+### Repository Test — @DataJpaTest
+
+```java
+@DataJpaTest  // Sirf JPA layer test karo — H2 in-memory DB use hoti hai
+class UserRepositoryTest {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Test
+    void findByEmail_returnsUser() {
+        // GIVEN
+        User user = new User(null, "Rahul", "rahul@gmail.com");
+        userRepository.save(user);
+
+        // WHEN
+        User found = userRepository.findByEmail("rahul@gmail.com");
+
+        // THEN
+        assertThat(found).isNotNull();
+        assertThat(found.getName()).isEqualTo("Rahul");
+    }
+}
+```
+
+---
+
+### Test Annotations Quick Reference
+
+```java
+@Test               // Ye method ek test hai
+@BeforeEach         // Har test se pehle run karo
+@AfterEach          // Har test ke baad run karo
+@BeforeAll          // Sab tests se pehle ek baar
+@AfterAll           // Sab tests ke baad ek baar
+@Disabled           // Ye test skip karo
+@ParameterizedTest  // Same test alag alag data se chalao
+```
+
+```java
+@BeforeEach
+void setUp() {
+    userRepository.deleteAll(); // Har test fresh start se
+}
+
+@ParameterizedTest
+@ValueSource(strings = {"rahul@gmail.com", "john@yahoo.com"})
+void validEmail_test(String email) {
+    assertThat(emailValidator.isValid(email)).isTrue();
+}
+```
+
+---
+
+### Interview Questions
+
+**Q1. Unit test aur Integration test mein kya difference hai?**
+> Unit test — ek class izolate karke test karo, fast, Mockito use karo. Integration test — poora system saath test karo, slow, `@SpringBootTest` use karo
+
+**Q2. @Mock vs @MockBean kya difference hai?**
+> `@Mock` — pure Mockito, Spring context nahi hota. `@MockBean` — Spring context mein real bean ki jagah mock inject karta hai
+
+**Q3. @DataJpaTest kab use karte hain?**
+> Sirf Repository layer test karni ho — fast, H2 in-memory DB use hoti hai, poora Spring context load nahi hota
+
+**Q4. MockMvc kya hota hai?**
+> HTTP requests simulate karne ke liye — actual server start kiye bina Controller layer test kar sakte ho
+
+**Q5. Given-When-Then pattern kya hai?**
+> Test structure — Given (setup), When (action), Then (assert). Code readable rehta hai
+
+---
+
+### Summary Table
+
+| Annotation | Kaam |
+|---|---|
+| `@ExtendWith(MockitoExtension)` | Pure unit test — no Spring |
+| `@SpringBootTest` | Full integration test |
+| `@DataJpaTest` | Sirf JPA/Repository test |
+| `@AutoConfigureMockMvc` | MockMvc auto setup |
+| `@Mock` | Mockito fake object |
+| `@InjectMocks` | Real class with mocks |
+| `@MockBean` | Spring context mein mock |
+| `MockMvc` | HTTP requests simulate karo |
+| `@ActiveProfiles("test")` | Test profile use karo |
 
 ---
 
@@ -1255,9 +1922,43 @@ public User createUser(@Valid @RequestBody User user) {
 | @RequestBody | JSON → Java object |
 | @ControllerAdvice | Global exception handler |
 | ResponseEntity | HTTP status + body control |
+| Authentication | Login verify — kaun ho tum |
+| Authorization | Permission check — kya kar sakte ho |
+| JWT | Stateless token-based auth |
+| BCrypt | Password hashing — one way |
+| @PreAuthorize | Method level security |
+| @EnableAutoConfiguration | Auto-config enable karo |
+| @ConditionalOnClass | Class hai toh configure karo |
+| @ConditionalOnMissingBean | Bean nahi hai toh configure karo |
+| Profile | Environment-specific config |
+| @Profile("dev") | Sirf dev mein ye bean bano |
+| spring.profiles.active | Profile activate karo |
+| @SpringBootTest | Full integration test |
+| @DataJpaTest | Sirf JPA layer test |
+| @MockBean | Spring context mein mock inject |
+| MockMvc | HTTP requests simulate karo |
 
 ---
 
-*Notes banaye gaye hain: Spring Core Interview Preparation ke liye*  
-*Topics covered: Spring Core vs Boot, IoC & DI, Bean Lifecycle, Bean Scopes, Annotations, AOP, ApplicationContext, Spring Data JPA, Spring MVC*  
-*Aage: Spring Security*
+## ✅ Topics Complete!
+
+```
+✅ 1.  Spring Core vs Boot
+✅ 2.  IoC & Dependency Injection
+✅ 3.  Bean Lifecycle
+✅ 4.  Bean Scopes
+✅ 5.  Spring Annotations
+✅ 6.  AOP
+✅ 7.  ApplicationContext & BeanFactory
+✅ 8.  Spring Data JPA
+✅ 9.  Spring MVC
+✅ 10. Spring Security
+✅ 11. Auto-Configuration
+✅ 12. Profiles
+✅ 13. Testing
+```
+
+---
+
+*Notes banaye gaye hain: Spring Core + Boot Interview Preparation ke liye*  
+*Ye notes interview ke liye complete hain — All the best! 🚀*
